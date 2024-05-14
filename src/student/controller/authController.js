@@ -46,9 +46,12 @@ const CreateUsers = async (req, res) => {
         return res.status(403).send("You have not permissions to create user")
     }
 
-    if (user.object.role !== "admin" && role === "hod"){
-        return res.status(403).send("you have not permissions to create user with HOD role")
+    if (user.object.role !== "admin" && role === "hod" || role === "admin"){
+        return res.status(403).send("you have not permissions to create user with specified role")
     }
+    // if (user.object.role !== "admin" && role === "admin"){
+    //     return res.status(403).send("you have not permissions to create user with HOD role")
+    // }
 
     if (!username || !password || !role) {
         return res.status(400).json({
