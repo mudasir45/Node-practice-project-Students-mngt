@@ -8,8 +8,8 @@ const router = Router();
 router.get('/', authMiddleware.validateToken, controller.GetStudents);
 router.get('/:id', controller.GetStudentWithId);
 router.post('/create_student', authMiddleware.validateToken, middleware.upload.single('profile_img'), controller.CreateStudent);
-router.put('/:id', controller.updateStudent);
-router.delete('/:id', controller.deleteStudent);
-router.post('/upload_doc', middleware.upload.single('doc_file'), authMiddleware.validateToken, controller.UploadDocs);
+router.put('/:id', authMiddleware.validateToken, middleware.upload.single('profile_img'), controller.UpdateStudent);
+router.delete('/:id', authMiddleware.validateToken, controller.DeleteStudent);
+router.post('/upload_doc', authMiddleware.validateToken, middleware.upload.single('doc_file'), controller.UploadDocs);
 
 module.exports = router;

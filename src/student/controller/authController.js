@@ -8,13 +8,13 @@ const authUtils = require('../utils/auth.utils')
 let refreshTokens = [];
 
 
-const SignUp = async (req, res) => {
-    const { username, password, role } = req.body;
+const CreateAdminUSer = async (req, res) => {
+    const { username, password } = req.body;
 
-    if (!username || !password || !role) {
+    if (!username || !password) {
         return res.status(400).json({
             "message": "One or more fields are missing!",
-            "required_fields": ["username", "password", "role"]
+            "required_fields": ["username", "password"]
         });
     }
 
@@ -25,7 +25,45 @@ const SignUp = async (req, res) => {
         }
 
         const hashedPassword = await authUtils.HashPassword(password);
+        const role = "admin";
+        const newUser = await pool.query(queries.CreateUser, [username, hashedPassword, role]);
 
+        return res.status(201).json({
+            "message": "Admin User Created Successfully!",
+            "user": newUser.rows
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).send("Internal Server Error");
+    }
+}
+
+const CreateUsers = async (req, res) => {
+    const { username, password, role } = req.body;
+    const user = req.user;
+    // return res.json({role:user.object.role})
+    if (user.object.role != "admin" && user.object.role != "hod") {
+        return res.status(403).send("You have not permissions to create user")
+    }
+
+    if (user.object.role !== "admin" && role === "hod"){
+        return res.status(403).send("you have not permissions to create user with HOD role")
+    }
+
+    if (!username || !password || !role) {
+        return res.status(400).json({
+            "message": "One or more fields are missing!",
+            "required_fields": ["username", "password", "role"]
+        });
+    }
+    
+    try {
+        const usernameExists = await pool.query(queries.CheckUsernameExists, [username]);
+        if (usernameExists.rows.length) {
+            return res.status(409).send("Username already exists!");
+        }
+
+        const hashedPassword = await authUtils.HashPassword(password);
         const newUser = await pool.query(queries.CreateUser, [username, hashedPassword, role]);
 
         return res.status(201).json({
@@ -100,7 +138,8 @@ const GetToken = (req, res) => {
 
 
 module.exports = {
-    SignUp,
+    CreateAdminUSer,
+    CreateUsers,
     Login,
     GetToken,
 }

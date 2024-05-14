@@ -1,16 +1,27 @@
 const pool = require('../../../db')
 const queries = require('../quries/quries');
 const path = require('path')
-const utils = require('../utils/student.utils')
+const utils = require('../utils/student.utils');
+const { response } = require('express');
 
 const GetStudents = async (req, res) => {
+
+    const user = req.user;
+    if (user.object.role == "student"){
+
+
+        const obj = await pool.query("SELECT * FROM student s WHERE s.user_id=$1;", [user.object.id]);
+
+        return res.status(403).json({student:obj.rows, id:user.object.id})
+    }
+
     try {
         const page = parseInt(req.query.page) || 1; 
         const pageSize = parseInt(req.query.limit) || 0;
 
         if (pageSize <= 0) {
             const allStudents = await pool.query(queries.GetAllStudents);
-            return res.status(200).json(allStudents);
+            return res.status(200).json(allStudents.rows);
         }
 
         const offset = (page - 1) * pageSize;
@@ -63,31 +74,26 @@ const GetStudentWithId = (req, res) => {
     });
 }
 
-
 const CreateStudent = async (req, res) => {
     const { name, email, age, department_id } = req.body;
     const file = req.file;
     const user = req.user;
     const userId = user.object.id;
 
+    if (user.object.role === "student"){
+     
+        return res.status(403).json({ message: "You have not premisstions to create student object"});
+    }
+
     if (!name || !email || !age || !file || !department_id) {
         return res.status(400).json({ message: "One or more fields are missing!", required_fields: ["name", "email", "age", "profile_img", "department_id"] });
     }
 
-    if (user.object.role === "student"){
-        const obj = await pool.query("SELECT * FROM student WHERE created_by=$1", [userId]);
-        if (obj.rows.length){
-            return res.send("Your are not be able to create more than one student objects as your role is student!");
-        }
-
-        const response = await utils.CreateStudentObj(name, email, age, file, userId, department_id, createdBy=userId);
-        if (response===null){
-            return res.status(500).send('Internal Server Error');
-        }
-        return res.status(201).json({ message: "Student created successfully!", response });
+    if (!utils.ValidateEmail(email)){
+        return res.status(500).json("Invalid Email Address!");
     }
 
-    
+
     try {
         const emailExists = await utils.CheckEmailExists(email);
         if (emailExists) {
@@ -106,58 +112,103 @@ const CreateStudent = async (req, res) => {
     }
 };
 
-const updateStudent = async (req, res)=>{
-    const {name, email, age} = req.body;
+const UpdateStudent = async (req, res)=>{
+    const { name, email, age, department_id } = req.body;
+    const file = req.file;
+    const user = req.user;
+    const userId = user.object.id;
     const id = parseInt(req.params.id);
-    
-    if(!name || !email || !age || !req.file || !id){
-        return res.status(500).json({message:"One or more fields are missing!", required_fields:"name, email, age, profile_img"})
+
+    if (!id || isNaN(id)) {
+        return res.status(400).json({ message: "Invalid or missing student ID in request parameters" });
     }
 
-    pool.query(queries.getStudentByID, [id], (error, results)=>{
+    if (!name || !email || !age || !file || !department_id) {
+        return res.status(400).json({ message: "One or more fields are missing!", required_fields: ["name", "email", "age", "profile_img", "department_id"] });
+    }
+
+    if (user.object.role == "student"){
+        const obj = await pool.query("SELECT * FROM student WHERE user_id=$1 AND id=$2", [userId, id]);
+        if (!obj.rows.length){
+            return res.status(403).send("Student not found! Please enter your currect ID");
+        }
+    }
+
+    pool.query(queries.GetStudentById, [id], (error, results)=>{
         if(error){
-            console.log(error)
-            return res.sendStatus("Error while getting student by id");
+            console.log("Error in update student fetching by id", error)
+            return res.status(500).sendStatus("Internal Server Error!");
         } 
         if(!results.rows.length){
-            res.status(404).send("Student not found!")
+            return res.status(404).send("Student not found!")
         }
     })
 
-    const newStudent = await utils.UpdateFile(name, email, age, req.file, flag="update", id);
-    return res.json({Message:"Student Created Successfully!", newStudent});
+    const response = await utils.UpdateStudentObj(std_id=id, name, email, age, file, userId, department_id, createdBy=userId);
+    if (response===null){
+        return res.status(500).send('Internal Server Error');
+    }
+    return res.status(200).json({ message: "Student updated successfully!", response });
     
-    pool.query(queries.updateStudentDetails, [name, email, age, id], (error, results)=>{
-        if (error) throw error;
-
-        res.json({"Message":"Student Updated Successfully!"});
-    })
 };
 
-const deleteStudent = (req, res)=>{
+const DeleteStudent = async (req, res) => {
     const id = parseInt(req.params.id);
-    pool.query(queries.getStudentByID, [id], (error, results)=>{
-        if(!results.rows.length){
-            res.status(404).send("Student not found!")
-        }
-    })
-    
-    pool.query(queries.deleteStudentDetails, [id], (error, results)=>{
-        if (error) throw error;
+    const user = req.user;
 
-        res.json({"Message":"Student Deleted Successfully!"});
-    })
+    try {
+        if (!id || isNaN(id)) {
+            return res.status(400).json({ message: "Invalid or missing student ID in request parameters" });
+        }
+
+        if (user.object.role !== "hod") {
+            return res.status(403).send("You do not have permissions to perform this task!");
+        }
+
+        const student = await pool.query(queries.GetStudentById, [id]);
+        if (student.rows.length === 0) {
+            return res.status(404).send("Student not found!");
+        }
+
+        const response = await utils.DeleteStudentObj(id);
+        if (!response) {
+            return res.status(500).send('Internal Server Error');
+        }
+
+        return res.status(200).json({ message: "Student deleted successfully!" });
+    } catch (error) {
+        console.error("Error deleting student:", error);
+        return res.status(500).send('Internal Server Error');
+    }
 };
+
 
 const UploadDocs = async (req, res)=>{
     const {student_id, title} = req.body;
-    if (!student_id || !title || !req.file){
-        return res.status(500).json({"message":"One or more fields are missing!", required_fields:"student_id, title, doc_file"})
+    const user = req.user;
+    const userId = user.object.id;
+    const file = req.file
+    if (!student_id || !title || !file){
+        return res.status(500).json({"message":"One or more fields are missing!", required_fields:["student_id", "title", "doc_file"]})
     }
-    try {
-        const newDoc = await utils.UploadStudentDoc(student_id, title, req.file);
-        return res.json({Message:"Document Uploaded Sucessfully!", newDoc});
 
+    if (user.object.role != "student"){
+        return res.status(403).send("Only students can upload their docs for now!")
+    }
+
+    if (user.object.role == "student"){
+        const obj = await pool.query("SELECT * FROM student WHERE user_id=$1 AND id=$2", [userId, student_id]);
+        if (!obj.rows.length){
+            return res.status(403).send("Student not found! Please enter your currect student ID");
+        }
+    }
+
+    try {
+        const response = await utils.UploadStudentDoc(student_id, title, file);
+        if (response===null){
+            return res.status(500).send('Internal Server Error');
+        }
+        return res.status(200).json({ message: "Ducument uploaded successfully!", response });
 
     } catch (error) {
         console.error(error);
@@ -170,7 +221,7 @@ module.exports = {
     GetStudents,
     GetStudentWithId,
     CreateStudent,
-    updateStudent,
-    deleteStudent,
+    UpdateStudent,
+    DeleteStudent,
     UploadDocs,
 }

@@ -22,12 +22,31 @@ const UploadOnCloudinary = async (LocalFilePath)=>{
             resource_type: "auto"
         })
         console.log("File uplaoded successfull!, ", (await response).url);
-        // fs.unlinkSync(LocalFilePath);
+        fs.unlinkSync(LocalFilePath);
         return response
     }
     catch (error){
         
         fs.unlinkSync(LocalFilePath);
+        console.log("at uploadOnCloudinary error")
+        return null;
+    }
+}
+
+const DeleteOnCloudinary = async (public_id, type)=>{
+    try{
+        if (!public_id){
+            return null;
+        }
+        const response = await cloudinary.api.delete_resources([public_id], {
+             type: 'upload', 
+             resource_type: type 
+            })
+        console.log("File deleted successfully!, ", response);
+        // fs.unlinkSync(LocalFilePath);
+        return response
+    }
+    catch (error){
         console.log("at uploadOnCloudinary error")
         return null;
     }
@@ -39,9 +58,8 @@ const CreateStudentObj = async (name, email, age, file, userId, department_id, c
         const {originalname, filename } = file;
         const filePath = path.join(__dirname, '../../../uploads', filename); 
         const response = await UploadOnCloudinary(filePath);
-        // console.log(response.url)
         const newStudent = await pool.query(queries.InsertStudent, [name, email, age, response.url, userId, department_id, createdBy]);
-        return {student:newStudent.rows};
+        return {response, student:newStudent.rows};
 
     } catch (error){
         console.error("Error creating student utils:", error);
@@ -49,30 +67,53 @@ const CreateStudentObj = async (name, email, age, file, userId, department_id, c
 
     }
 }
-
-
-const UpdateFile = async(id, name, email, age, file)=> {
+const UpdateStudentObj = async (std_id, name, email, age, file, userId, department_id, createdBy)=> {
     try{
         const {originalname, filename } = file;
         const filePath = path.join(__dirname, '../../../uploads', filename); 
+        const obj = await pool.query("SELECT s.profile_img FROM student s WHERE s.id=$1", [std_id]);
+        const old_url = obj.rows[0].profile_img;
+        const public_id = old_url.split(' ')[1]
+        console.log(public_id)
+
+        const deleteResponse = await DeleteOnCloudinary(public_id, 'image')
+
         const response = await UploadOnCloudinary(filePath);
-        console.log(response.url)
-        const newStudent = await pool.query('INSERT INTO student (name, email, age, profile_img) VALUES ($1, $2, $3, $4) RETURNING *', [name, email, age, response.url]);
-        return {url, response, student:newStudent.rows};
+        const url = `${response.url} ${response.public_id}`
+        const newStudent = await pool.query(queries.UpdateStudent, [std_id,name, email, age, url, userId, department_id, createdBy]);
+        return {deleteResponse, student:newStudent.rows};
+
     } catch (error){
-        console.log(error)
+        console.error("Error updating student utils:", error);
         return null;
 
     }
 }
 
+const DeleteStudentObj = async (std_id)=> {
+    try{
+        const obj = await pool.query("SELECT s.profile_img FROM student s WHERE s.id=$1", [std_id]);
+        const old_url = obj.rows[0].profile_img;
+        const public_id = old_url.split(' ')[1]
+        await DeleteOnCloudinary(public_id, 'image')
+        await pool.query(queries.DeleteStudent, [std_id]);
+        return true;
+
+    } catch (error){
+        console.error("Error updating student utils:", error);
+        return null;
+
+    }
+}
+
+
 const UploadStudentDoc = async(studentId, title, file)=> {
     try{
-        const {originalname, filename } = file;
+        const { filename } = file;
         const filePath = path.join(__dirname, '../../../uploads', filename); 
         const response = await UploadOnCloudinary(filePath);
-        console.log(response.url)
-        const newDoc = await pool.query('INSERT INTO student_doc (student_id, doc_title, doc_file) VALUES ($1, $2, $3) RETURNING *', [studentId, title, response.url]);
+        const url = `${response.url} ${response.public_id}`
+        const newDoc = await pool.query(queries.CreateStudentDoc, [studentId, title, url, response.resource_type]);
         return {url:response.url, newDoc:newDoc.rows};
     } catch (error){
         console.log(error)
@@ -97,11 +138,19 @@ const CheckEmailExists = async(email)=> {
 }
 
 
+const ValidateEmail = (email) => {
+    return email.match(
+      /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/
+    );
+  };
+
 module.exports = {
     UploadOnCloudinary,
     CreateStudentObj,
-    UpdateFile,
+    UpdateStudentObj,
     UploadStudentDoc,
     GetStudentsPage,
     CheckEmailExists,
+    DeleteStudentObj,
+    ValidateEmail,
 }
